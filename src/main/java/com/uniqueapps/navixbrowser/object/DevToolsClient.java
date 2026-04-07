@@ -46,7 +46,7 @@ public class DevToolsClient implements Runnable {
     @Override
     public void run() {
         try {
-            URL url = new URL("http://localhost:" + Main.DEBUG_PORT + "/json");
+            URL url = URI.create("http://localhost:" + Main.DEBUG_PORT + "/json").toURL();
             try (InputStream in = url.openStream()) {
                 JsonArray browserJsonArray = JsonParser.parseReader(new BufferedReader(new InputStreamReader(in))).getAsJsonArray();
                 browserJsonArray.forEach(jsonElement -> {

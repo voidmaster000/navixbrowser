@@ -27,6 +27,7 @@ import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.net.HttpURLConnection;
 import java.net.MalformedURLException;
+import java.net.URI;
 import java.net.URL;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
@@ -159,9 +160,9 @@ public class BrowserWindow extends JFrame {
 			suggestionsPopupMenu.setVisible(false);
 			String query = browserAddressField.getText();
 			try {
-				new URL(query);
+				URI.create(query).toURL();
 				tabbedPane.getSelectedBrowser().loadURL(query);
-			} catch (MalformedURLException e) {
+			} catch (IllegalArgumentException | MalformedURLException e) {
 				if (query.contains(".") || query.contains("://")) {
 					tabbedPane.getSelectedBrowser().loadURL(query);
 				} else {
@@ -374,7 +375,7 @@ public class BrowserWindow extends JFrame {
 			bookmarkButton.setBackground(this.getBackground());
 			try {
 				bookmarkButton.setIcon(new ImageIcon(
-						ImageIO.read(new URL("https://www.google.com/s2/favicons?domain=" + bookmark.getValue()))));
+						ImageIO.read(URI.create("https://www.google.com/s2/favicons?domain=" + bookmark.getValue()).toURL())));
 			} catch (IOException e) {
 				Main.logger.log(Level.SEVERE, "Failed to load bookmark icon: {0}", e.getMessage());
 			}
@@ -496,7 +497,7 @@ public class BrowserWindow extends JFrame {
 			bookmarkButton.setBackground(this.getBackground());
 			try {
 				bookmarkButton.setIcon(new ImageIcon(
-						ImageIO.read(new URL("https://www.google.com/s2/favicons?domain=" + bookmark.getValue()))));
+						ImageIO.read(URI.create("https://www.google.com/s2/favicons?domain=" + bookmark.getValue()).toURL())));
 			} catch (IOException e) {
 				Main.logger.log(Level.SEVERE, "Failed to load bookmark icon: {0}", e.getMessage());
 			}
@@ -527,7 +528,7 @@ public class BrowserWindow extends JFrame {
 				return;
 			}
 			try {
-				URL url = new URL("https://suggestqueries.google.com/complete/search?client=chrome&gl=US&q=" + URLEncoder.encode(searchString, StandardCharsets.UTF_8));
+				URL url = URI.create("https://suggestqueries.google.com/complete/search?client=chrome&gl=US&q=" + URLEncoder.encode(searchString, StandardCharsets.UTF_8)).toURL();
 				HttpURLConnection conn = (HttpURLConnection) url.openConnection();
 				conn.setRequestMethod("GET");
 				JsonReader reader = new JsonReader(new BufferedReader(new InputStreamReader(conn.getInputStream())));

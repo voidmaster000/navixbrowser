@@ -2,7 +2,7 @@ package com.uniqueapps.navixbrowser.handler;
 
 import java.io.IOException;
 import java.net.MalformedURLException;
-import java.net.URL;
+import java.net.URI;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -153,7 +153,7 @@ public class NavixResourceRequestHandler extends CefResourceRequestHandlerAdapte
         }
         if (!request.getURL().contains("navix://") && !request.getURL().contains("file://")) {
             try {
-                String host = new URL(request.getURL()).getHost();
+                String host = URI.create(request.getURL()).toURL().getHost();
 
                 if (Main.settings.enableTrackerBlock) {
                     if (Arrays.asList(analytics).contains(host)) {

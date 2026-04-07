@@ -2,7 +2,7 @@ package com.uniqueapps.navixbrowser.handler;
 
 import java.awt.Component;
 import java.io.IOException;
-import java.net.URL;
+import java.net.URI;
 import java.util.logging.Level;
 
 import javax.imageio.ImageIO;
@@ -59,7 +59,7 @@ public class NavixDisplayHandler extends CefDisplayHandlerAdapter {
 						SwingUtilities.invokeLater(() -> {
 							try {
 								tabInfoLabel.setIcon(new ImageIcon(
-										ImageIO.read(new URL("https://www.google.com/s2/favicons?domain=" + cefBrowser.getURL()))));
+										ImageIO.read(URI.create("https://www.google.com/s2/favicons?domain=" + cefBrowser.getURL()).toURL())));
 							} catch (IOException e) {
 								tabInfoLabel.setIcon(null);
 							}
