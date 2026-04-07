@@ -9,8 +9,17 @@ import org.cef.handler.CefLoadHandlerAdapter;
 import org.cef.network.CefRequest.TransitionType;
 
 import javax.swing.*;
+import java.util.Map;
+import java.util.concurrent.*;
 
 public class NavixLoadHandler extends CefLoadHandlerAdapter {
+
+    private static final ScheduledExecutorService DARK_MODE_EXECUTOR = Executors.newSingleThreadScheduledExecutor(r -> {
+        Thread thread = new Thread(r, "navix-dark-mode");
+        thread.setDaemon(true);
+        return thread;
+    });
+    private static final Map<Integer, ScheduledFuture<?>> DARK_MODE_TASKS = new ConcurrentHashMap<>();
 
     JButton forwardNav, backwardNav;
     BrowserWindow browserWindow;
@@ -25,21 +34,23 @@ public class NavixLoadHandler extends CefLoadHandlerAdapter {
     public void onLoadStart(CefBrowser cefBrowser, CefFrame frame, TransitionType transitionType) {
         super.onLoadStart(cefBrowser, frame, transitionType);
         if (browserWindow.tabbedPane.getSelectedBrowser() == cefBrowser) {
-            browserWindow.loadBar.setIndeterminate(false);
-            browserWindow.loadBar.setValue(0);
-            browserWindow.loadBar.setIndeterminate(true);
-            browserWindow.loadBar.setVisible(true);
+            SwingUtilities.invokeLater(() -> {
+                browserWindow.loadBar.setIndeterminate(false);
+                browserWindow.loadBar.setValue(0);
+                browserWindow.loadBar.setIndeterminate(true);
+                browserWindow.loadBar.setVisible(true);
+            });
         }
-        new Thread(new DarkModeHandler(cefBrowser)).start();
+        scheduleDarkModeUpdate(cefBrowser);
     }
 
     @Override
     public void onLoadEnd(CefBrowser cefBrowser, CefFrame frame, int httpStatusCode) {
         super.onLoadEnd(cefBrowser, frame, httpStatusCode);
         if (browserWindow.tabbedPane.getSelectedBrowser() == cefBrowser) {
-            browserWindow.loadBar.setVisible(false);
+            SwingUtilities.invokeLater(() -> browserWindow.loadBar.setVisible(false));
         }
-        new Thread(new DarkModeHandler(cefBrowser)).start();
+        scheduleDarkModeUpdate(cefBrowser);
     }
 
     @Override
@@ -49,14 +60,14 @@ public class NavixLoadHandler extends CefLoadHandlerAdapter {
             forwardNav.setEnabled(cefBrowser.canGoForward());
             backwardNav.setEnabled(cefBrowser.canGoBack());
         }
-        new Thread(new DarkModeHandler(cefBrowser)).start();
+        scheduleDarkModeUpdate(cefBrowser);
     }
 
     @Override
     public void onLoadError(CefBrowser cefBrowser, CefFrame cefFrame, ErrorCode errorCode, String s, String s1) {
         super.onLoadError(cefBrowser, cefFrame, errorCode, s, s1);
         if (browserWindow.tabbedPane.getSelectedBrowser() == cefBrowser) {
-            browserWindow.loadBar.setVisible(false);
+            SwingUtilities.invokeLater(() -> browserWindow.loadBar.setVisible(false));
             if (errorCode.getCode() != -3) {
                 SwingUtilities.invokeLater(() -> JOptionPane.showOptionDialog(
                         browserWindow,
@@ -69,6 +80,21 @@ public class NavixLoadHandler extends CefLoadHandlerAdapter {
                         null));
             }
         }
+    }
+
+    private static void scheduleDarkModeUpdate(CefBrowser cefBrowser) {
+        int browserObjectKey = System.identityHashCode(cefBrowser);
+        ScheduledFuture<?> previousTask = DARK_MODE_TASKS.get(browserObjectKey);
+        if (previousTask != null) {
+            previousTask.cancel(false);
+        }
+
+        ScheduledFuture<?> newTask = DARK_MODE_EXECUTOR.schedule(() -> {
+            new DarkModeHandler(cefBrowser).run();
+            DARK_MODE_TASKS.remove(browserObjectKey);
+        }, 150, TimeUnit.MILLISECONDS);
+
+        DARK_MODE_TASKS.put(browserObjectKey, newTask);
     }
 }
 

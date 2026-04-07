@@ -5,7 +5,12 @@ import java.net.MalformedURLException;
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
 import java.util.logging.Level;
 
 import org.cef.browser.CefBrowser;
@@ -28,6 +33,7 @@ public class NavixResourceRequestHandler extends CefResourceRequestHandlerAdapte
     public static final List<String> GOOGLE_THREAT_TYPES = Arrays.asList("THREAT_TYPE_UNSPECIFIED", "MALWARE", "SOCIAL_ENGINEERING", "UNWANTED_SOFTWARE", "POTENTIALLY_HARMFUL_APPLICATION");
     public static final List<String> GOOGLE_PLATFORM_TYPES = Arrays.asList("CHROME", "WINDOWS");
     public static final List<String> GOOGLE_THREAT_ENTRY_TYPES = List.of("URL");
+    private static final long SAFE_BROWSING_CACHE_TTL_MS = TimeUnit.MINUTES.toMillis(10);
 
     String[] hasInLink = {
             "smartadserver.com", "bidswitch.net", "taboola", "amazon-adsystem.com", "survey.min.js", "survey.js", "social-icons.js", "intergrator.js", "cookie.js", "analytics.js", "ads.js",
@@ -142,6 +148,11 @@ public class NavixResourceRequestHandler extends CefResourceRequestHandlerAdapte
             "reporting.powerad.ai", "monitor.ebay.com", "beacon.walmart.com", "capture.condenastdigital.com", "a.pub.network"
     };
 
+            private final Set<String> analyticsHosts = new HashSet<>(Arrays.asList(analytics));
+            private final Set<String> adHosts = new HashSet<>(Arrays.asList(ads));
+            private final Set<String> minerHosts = new HashSet<>(Arrays.asList(miners));
+            private final Map<String, CachedSafetyDecision> safeBrowsingDecisionCache = new ConcurrentHashMap<>();
+
     @Override
     public boolean onBeforeResourceLoad(CefBrowser browser, CefFrame frame, CefRequest request) {
         if (request.getResourceType() == CefRequest.ResourceType.RT_SCRIPT || request.getResourceType() == CefRequest.ResourceType.RT_XHR) {
@@ -156,13 +167,13 @@ public class NavixResourceRequestHandler extends CefResourceRequestHandlerAdapte
                 String host = URI.create(request.getURL()).toURL().getHost();
 
                 if (Main.settings.enableTrackerBlock) {
-                    if (Arrays.asList(analytics).contains(host)) {
+                    if (analyticsHosts.contains(host)) {
                         return true;
                     }
                 }
 
                 if (Main.settings.enableAdBlock) {
-                    if (Arrays.asList(ads).contains(host) || Arrays.asList(miners).contains(host)) {
+                    if (adHosts.contains(host) || minerHosts.contains(host)) {
                         return true;
                     }
                     for (String minerFile : minersFiles) {
@@ -172,14 +183,19 @@ public class NavixResourceRequestHandler extends CefResourceRequestHandlerAdapte
                     }
                 }
 
-                if (Main.settings.enableSafeBrowsing) {
-                    GoogleSecuritySafebrowsingV4FindThreatMatchesResponse findThreatMatchesResponse =
-                            Main.safebrowsing.threatMatches()
-                                    .find(createFindThreatMatchesRequest(request.getURL()))
-                                    .setKey(SECRETS.GOOGLE_API_KEY)
-                                    .execute();
+                if (Main.settings.enableSafeBrowsing
+                        && Main.safebrowsing != null
+                        && request.getResourceType() == CefRequest.ResourceType.RT_MAIN_FRAME) {
+                    String requestUrl = request.getURL();
+                    Boolean isBlockedBySafeBrowsing = getCachedSafeBrowsingDecision(requestUrl);
+                    if (isBlockedBySafeBrowsing == null) {
+                        isBlockedBySafeBrowsing = isBlockedBySafeBrowsing(requestUrl);
+                        safeBrowsingDecisionCache.put(requestUrl,
+                                new CachedSafetyDecision(isBlockedBySafeBrowsing,
+                                        System.currentTimeMillis() + SAFE_BROWSING_CACHE_TTL_MS));
+                    }
 
-                    if (findThreatMatchesResponse.getMatches() != null && !findThreatMatchesResponse.getMatches().isEmpty()) {
+                    if (isBlockedBySafeBrowsing) {
                         return true;
                     }
                 }
@@ -191,6 +207,29 @@ public class NavixResourceRequestHandler extends CefResourceRequestHandlerAdapte
         }
         return false;
     }
+
+    private Boolean getCachedSafeBrowsingDecision(String url) {
+        CachedSafetyDecision cachedDecision = safeBrowsingDecisionCache.get(url);
+        if (cachedDecision == null) {
+            return null;
+        }
+        if (cachedDecision.expiresAt < System.currentTimeMillis()) {
+            safeBrowsingDecisionCache.remove(url);
+            return null;
+        }
+        return cachedDecision.blocked;
+    }
+
+    private boolean isBlockedBySafeBrowsing(String url) throws IOException {
+        GoogleSecuritySafebrowsingV4FindThreatMatchesResponse findThreatMatchesResponse =
+                Main.safebrowsing.threatMatches()
+                        .find(createFindThreatMatchesRequest(url))
+                        .setKey(SECRETS.GOOGLE_API_KEY)
+                        .execute();
+        return findThreatMatchesResponse.getMatches() != null && !findThreatMatchesResponse.getMatches().isEmpty();
+    }
+
+    private record CachedSafetyDecision(boolean blocked, long expiresAt) {}
 
     private static GoogleSecuritySafebrowsingV4FindThreatMatchesRequest createFindThreatMatchesRequest(String url) {
         GoogleSecuritySafebrowsingV4FindThreatMatchesRequest findThreatMatchesRequest = new GoogleSecuritySafebrowsingV4FindThreatMatchesRequest();

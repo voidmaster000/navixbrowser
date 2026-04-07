@@ -32,9 +32,14 @@ import java.net.URL;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.logging.Level;
 
 import javax.imageio.ImageIO;
@@ -74,6 +79,8 @@ public class BrowserWindow extends JFrame {
 	public JToolBar toolBar2;
 	public final JPopupMenu suggestionsPopupMenu;
 	private final Timer suggestionTimer;
+	private final ExecutorService suggestionExecutor;
+	private final AtomicInteger suggestionRequestVersion = new AtomicInteger();
 	public final BetterJLabel tooltip;
 	public final Timer tooltipTimer;
 	public boolean browserIsInFocus = false;
@@ -131,6 +138,11 @@ public class BrowserWindow extends JFrame {
 		browserAddressField = new BetterJTextField(100);
 		browserSearchField = new HintTextField("Search in page", 100);
 		suggestionsPopupMenu = new JPopupMenu();
+		suggestionExecutor = Executors.newSingleThreadExecutor(r -> {
+			Thread thread = new Thread(r, "navix-suggestions");
+			thread.setDaemon(true);
+			return thread;
+		});
 		suggestionTimer = new Timer(500, null);
 		suggestionTimer.addActionListener(e -> {
 			if (!browserAddressField.hasFocus()) {
@@ -475,6 +487,12 @@ public class BrowserWindow extends JFrame {
 		getContentPane().add(bottomPanel, BorderLayout.SOUTH);
 	}
 
+	@Override
+	public void dispose() {
+		suggestionExecutor.shutdownNow();
+		super.dispose();
+	}
+
 	private void refreshBookmarks() {
 		try (ObjectOutputStream oos = new ObjectOutputStream(new FileOutputStream(bookmarkFile))) {
 			oos.writeObject(bookmarks);
@@ -527,36 +545,60 @@ public class BrowserWindow extends JFrame {
 				suggestionsPopupMenu.setVisible(false);
 				return;
 			}
-			try {
-				URL url = URI.create("https://suggestqueries.google.com/complete/search?client=chrome&gl=US&q=" + URLEncoder.encode(searchString, StandardCharsets.UTF_8)).toURL();
-				HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-				conn.setRequestMethod("GET");
-				JsonReader reader = new JsonReader(new BufferedReader(new InputStreamReader(conn.getInputStream())));
+
+			int requestVersion = suggestionRequestVersion.incrementAndGet();
+			suggestionExecutor.submit(() -> {
+				List<String> suggestions = fetchSuggestions(searchString);
+				SwingUtilities.invokeLater(() -> {
+					if (requestVersion != suggestionRequestVersion.get()) {
+						return;
+					}
+					if (!browserAddressField.hasFocus() || !searchString.equals(browserAddressField.getText())) {
+						return;
+					}
+
+					suggestionsPopupMenu.removeAll();
+					for (String suggestion : suggestions) {
+						JMenuItem menuItem = new JMenuItem(suggestion);
+						menuItem.addActionListener(l -> {
+							browserAddressField.setText(menuItem.getText());
+							browserAddressField.getActionListeners()[0].actionPerformed(null);
+							suggestionsPopupMenu.setVisible(false);
+						});
+						suggestionsPopupMenu.add(menuItem);
+					}
+
+					suggestionsPopupMenu.revalidate();
+					suggestionsPopupMenu.repaint();
+					if (!suggestions.isEmpty()) {
+						if (!suggestionsPopupMenu.isVisible()) {
+							suggestionsPopupMenu.setPopupSize(browserAddressField.getWidth(), 300);
+							suggestionsPopupMenu.show(browserAddressField, 0, browserAddressField.getHeight());
+						}
+					} else {
+						suggestionsPopupMenu.setVisible(false);
+					}
+				});
+			});
+		}
+	}
+
+	private List<String> fetchSuggestions(String searchString) {
+		List<String> suggestions = new ArrayList<>();
+		try {
+			URL url = URI.create("https://suggestqueries.google.com/complete/search?client=chrome&gl=US&q=" + URLEncoder.encode(searchString, StandardCharsets.UTF_8)).toURL();
+			HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+			conn.setRequestMethod("GET");
+			conn.setConnectTimeout(1500);
+			conn.setReadTimeout(2000);
+			try (JsonReader reader = new JsonReader(new BufferedReader(new InputStreamReader(conn.getInputStream())))) {
 				reader.setLenient(true);
 				JsonArray jsonArray = JsonParser.parseReader(reader).getAsJsonArray().get(1).getAsJsonArray();
-				suggestionsPopupMenu.removeAll();
-				jsonArray.forEach(jsonElement -> {
-					JMenuItem menuItem = new JMenuItem(jsonElement.getAsString());
-					menuItem.addActionListener(l -> {
-						browserAddressField.setText(menuItem.getText());
-						browserAddressField.getActionListeners()[0].actionPerformed(null);
-						suggestionsPopupMenu.setVisible(false);
-					});
-					suggestionsPopupMenu.add(menuItem);
-				});
-				suggestionsPopupMenu.revalidate();
-				suggestionsPopupMenu.repaint();
-				if (!jsonArray.isEmpty()) {
-					if (!suggestionsPopupMenu.isVisible()) {
-						suggestionsPopupMenu.setPopupSize(browserAddressField.getWidth(), 300);
-						suggestionsPopupMenu.show(browserAddressField, 0, browserAddressField.getHeight());
-					}
-				} else {
-					suggestionsPopupMenu.setVisible(false);
-				}
-			} catch (IOException e) {
-				Main.logger.log(Level.SEVERE, "Failed to get search suggestions: {0}", e.getMessage());
+				jsonArray.forEach(jsonElement -> suggestions.add(jsonElement.getAsString()));
 			}
+		} catch (IOException e) {
+			Main.logger.log(Level.FINE, "Failed to get search suggestions: {0}", e.getMessage());
 		}
+		return suggestions;
 	}
 }
