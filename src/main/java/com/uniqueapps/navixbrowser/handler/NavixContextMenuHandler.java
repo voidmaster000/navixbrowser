@@ -13,8 +13,7 @@ import java.awt.image.BufferedImage;
 import java.io.File;
 import java.io.IOException;
 import java.net.MalformedURLException;
-import java.net.URISyntaxException;
-import java.net.URL;
+import java.net.URI;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.Vector;
@@ -348,7 +347,7 @@ public class NavixContextMenuHandler extends CefContextMenuHandlerAdapter {
             switch (commandId) {
                 case COPY:
                     try {
-                        var image = ImageIO.read(new URL(params.getSourceUrl()));
+                        var image = ImageIO.read(URI.create(params.getSourceUrl()).toURL());
                         if (image != null) {
                             Toolkit.getDefaultToolkit().getSystemClipboard().setContents(new TransferableImage(image),
                                     null);
@@ -358,8 +357,12 @@ public class NavixContextMenuHandler extends CefContextMenuHandlerAdapter {
                     }
                     break;
                 case COPY_IMAGE_LINK:
-                    Toolkit.getDefaultToolkit().getSystemClipboard().setContents(new StringSelection(params.getSourceUrl()),
-                            null);
+                    try {
+                        Toolkit.getDefaultToolkit().getSystemClipboard().setContents(new StringSelection(URI.create(params.getSourceUrl()).toURL().toString()),
+                                null);
+                    } catch (HeadlessException | MalformedURLException e) {
+                        Main.logger.log(Level.SEVERE, "Failed to copy image link: {0}", e);
+                    }
                     break;
                 case SAVE_AS:
                     SwingUtilities.invokeLater(() -> {
@@ -369,7 +372,7 @@ public class NavixContextMenuHandler extends CefContextMenuHandlerAdapter {
                             chooser.setFileFilter(new FileNameExtensionFilter("JPG image", ".jpg"));
                             int option = chooser.showSaveDialog(browserWindow);
                             if (option == JFileChooser.APPROVE_OPTION) {
-                                ImageIO.write(ImageIO.read(new URL(params.getSourceUrl())), "jpg",
+                                ImageIO.write(ImageIO.read(URI.create(params.getSourceUrl()).toURL()), "jpg",
                                         chooser.getSelectedFile());
                             }
                         } catch (IOException e) {
@@ -402,9 +405,9 @@ public class NavixContextMenuHandler extends CefContextMenuHandlerAdapter {
 
     public static boolean isValidURL(String url) {
         try {
-            new URL(url).toURI();
+            URI.create(url);
             return true;
-        } catch (MalformedURLException | URISyntaxException e) {
+        } catch (IllegalArgumentException e) {
             return false;
         }
     }

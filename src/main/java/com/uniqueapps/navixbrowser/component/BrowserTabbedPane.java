@@ -20,7 +20,7 @@ import java.awt.event.WindowEvent;
 import java.awt.geom.Area;
 import java.awt.geom.RoundRectangle2D;
 import java.io.IOException;
-import java.net.URL;
+import java.net.URI;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
@@ -406,7 +406,7 @@ public class BrowserTabbedPane extends JTabbedPane {
         SwingUtilities.invokeLater(() -> {
             try {
                 tabInfoLabel.setIcon(new ImageIcon(
-                        ImageIO.read(new URL("https://www.google.com/s2/favicons?domain=" + cefBrowser.getURL()))));
+                        ImageIO.read(URI.create("https://www.google.com/s2/favicons?domain=" + cefBrowser.getURL()).toURL())));
             } catch (IOException ignored) {
             }
         });
